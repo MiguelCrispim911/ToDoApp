@@ -1,0 +1,80 @@
+Vagrant.configure("2") do |config|
+  config.vm.box = "bento/ubuntu-22.04"
+  config.vm.boot_timeout = 600
+
+  config.vm.define "teamcity-server" do |server|
+    server.vm.hostname = "teamcity-server"
+    server.vm.network "private_network", ip: "192.168.56.10"
+    server.vm.network "forwarded_port", guest: 8111, host: 8111, auto_correct: true
+    server.vm.provider "virtualbox" do |vb|
+      vb.name = "teamcity-server"
+      vb.memory = 4096
+      vb.cpus = 2
+    end
+
+    server.vm.provision "shell", inline: <<-SHELL
+      apt-get update -y
+      apt-get install -y openjdk-17-jdk wget curl unzip
+
+      mkdir -p /opt/teamcity
+      cd /opt/teamcity
+
+      if [ ! -f TeamCity-2025.03.3.tar.gz ]; then
+        wget https://download.jetbrains.com/teamcity/TeamCity-2025.03.3.tar.gz
+      fi
+
+      if [ ! -d TeamCity ]; then
+        tar -xzf TeamCity-2025.03.3.tar.gz
+        mv TeamCity /opt/teamcity/TeamCity
+      fi
+
+      /opt/teamcity/TeamCity/bin/runAll.sh start
+    SHELL
+  end
+
+  config.vm.define "teamcity-agent" do |agent|
+    agent.vm.hostname = "teamcity-agent"
+    agent.vm.network "private_network", ip: "192.168.56.11"
+    agent.vm.provider "virtualbox" do |vb|
+      vb.name = "teamcity-agent"
+      vb.memory = 4096
+      vb.cpus = 2
+    end
+
+    agent.vm.provision "shell", inline: <<-SHELL
+      apt-get update -y
+      apt-get install -y openjdk-17-jdk wget curl ca-certificates gnupg lsb-release git unzip
+
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      chmod a+r /etc/apt/keyrings/docker.gpg
+
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
+
+      apt-get update -y
+      apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+      usermod -aG docker vagrant
+
+      mkdir -p /opt/teamcity-agent
+      cd /opt/teamcity-agent
+
+      until curl -s http://192.168.56.10:8111 > /dev/null; do
+        sleep 10
+      done
+
+      if [ ! -f buildAgent.zip ]; then
+        wget http://192.168.56.10:8111/update/buildAgent.zip
+      fi
+
+      if [ ! -d buildAgent ]; then
+        unzip buildAgent.zip -d buildAgent
+      fi
+
+      sed -i 's#^serverUrl=.*#serverUrl=http://192.168.56.10:8111#' /opt/teamcity-agent/buildAgent/conf/buildAgent.properties || true
+      sed -i 's#^name=.*#name=teamcity-agent#' /opt/teamcity-agent/buildAgent/conf/buildAgent.properties || true
+
+      /opt/teamcity-agent/buildAgent/bin/agent.sh start
+    SHELL
+  end
+end
