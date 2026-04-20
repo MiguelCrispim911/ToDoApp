@@ -1,2 +1,3 @@
 .env
+infra/.vagrant/
 node_modules/
