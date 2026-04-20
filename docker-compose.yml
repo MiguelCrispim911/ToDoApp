@@ -13,6 +13,7 @@ services:
 
   app:
     build: .
+    image: miguelcrispim911/todoapp:${APP_VERSION:-dev}
     container_name: todoapp-app
     restart: unless-stopped
     depends_on:
